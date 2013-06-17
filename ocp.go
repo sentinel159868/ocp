@@ -66,6 +66,10 @@ func get(url string) (*http.Response, error) {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", userAgent)
+	if addHeader != "" {
+		header_pieces := strings.Split(addHeader, ":")
+		req.Header.Set(header_pieces[0], header_pieces[1])
+	}
 	return client.Do(req)
 }
 
@@ -243,6 +247,7 @@ var (
 	localDir    string
 	localSuffix string
 	userAgent   string
+	addHeader   string
 	verbose     bool
 	audit       bool
 	nowarn      bool
@@ -256,6 +261,7 @@ func init() {
 	flag.StringVar(&localDir, "l", "", "directory containing cached files (relative file names, i.e. /about/ -> <path>/about/index.html)")
 	flag.StringVar(&localSuffix, "ls", "index.html", "suffix of locally cached files")
 	flag.StringVar(&userAgent, "ua", defaultUA, "User-Agent header to send")
+	flag.StringVar(&addHeader, "H", "", "Additional header to add to requests")
 	flag.BoolVar(&verbose, "v", false, "show additional information about the priming process")
 	flag.BoolVar(&nowarn, "no-warn", false, "do not warn about pages that were not primed successfully")
 	flag.BoolVar(&audit, "a", false, "output HTTP status codes, fetch time. Incompatible with -v -a")
