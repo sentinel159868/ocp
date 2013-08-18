@@ -79,6 +79,7 @@ func getUrlsFromSitemap(path string, follow bool) (*Urlset, error) {
 		f      io.ReadCloser
 		err    error
 		res    *http.Response
+		ctype  string
 	)
 	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
 		if verbose {
@@ -91,6 +92,13 @@ func getUrlsFromSitemap(path string, follow bool) (*Urlset, error) {
 		if res.Status != "200 OK" {
 			return nil, fmt.Errorf("HTTP %s", res.Status)
 		}
+
+		// Check the content type
+		h, ok := res.Header["Content-Type"]
+		if ok && len(h) > 0 {
+			ctype = h[0]
+		}
+
 		f = res.Body
 	} else {
 		f, err = os.Open(path)
@@ -99,7 +107,8 @@ func getUrlsFromSitemap(path string, follow bool) (*Urlset, error) {
 		}
 	}
 	defer f.Close()
-	if strings.HasSuffix(path, ".gz") {
+
+	if strings.HasSuffix(path, ".gz") || strings.Contains(ctype, "gzip") {
 		if verbose {
 			log.Println("Extracting compressed data")
 		}
