@@ -305,6 +305,14 @@ func main() {
 	if max > 0 {
 		one = make(chan bool)
 	}
+
+
+    // disable transparent gzip compression for
+    // more hardcoreness
+    transport := &http.Transport{}
+    transport.DisableCompression = true
+    client.Transport = transport
+
 	sem = make(chan bool, throttle)
 	if primeUrls {
 		urlset = &Urlset{
