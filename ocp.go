@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 const (
@@ -66,6 +67,10 @@ func get(url string) (*http.Response, error) {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", userAgent)
+	if addHeader != "" {
+		header_pieces := strings.Split(addHeader, ":")
+		req.Header.Set(header_pieces[0], header_pieces[1])
+	}
 	return client.Do(req)
 }
 
@@ -75,6 +80,7 @@ func getUrlsFromSitemap(path string, follow bool) (*Urlset, error) {
 		f      io.ReadCloser
 		err    error
 		res    *http.Response
+		ctype  string
 	)
 	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
 		if verbose {
@@ -87,6 +93,13 @@ func getUrlsFromSitemap(path string, follow bool) (*Urlset, error) {
 		if res.Status != "200 OK" {
 			return nil, fmt.Errorf("HTTP %s", res.Status)
 		}
+
+		// Check the content type
+		h, ok := res.Header["Content-Type"]
+		if ok && len(h) > 0 {
+			ctype = h[0]
+		}
+
 		f = res.Body
 	} else {
 		f, err = os.Open(path)
@@ -95,7 +108,8 @@ func getUrlsFromSitemap(path string, follow bool) (*Urlset, error) {
 		}
 	}
 	defer f.Close()
-	if strings.HasSuffix(path, ".gz") {
+
+	if strings.HasSuffix(path, ".gz") || strings.Contains(ctype, "gzip") {
 		if verbose {
 			log.Println("Extracting compressed data")
 		}
@@ -173,9 +187,11 @@ func primeUrlset(urlset *Urlset) {
 
 func primeUrl(u Url) error {
 	var (
-		err    error
-		found  = false
-		weight = int(u.Priority * 100)
+		err     error
+		found   = false
+		weight  = int(u.Priority * 100)
+		start   time.Time
+		elapsed time.Duration
 	)
 	if localDir != "" {
 		var parsed *url.URL
@@ -194,13 +210,22 @@ func primeUrl(u Url) error {
 		if verbose {
 			log.Printf("Get (weight %d) %s\n", weight, u.Loc)
 		}
+		if audit {
+			start = time.Now()
+		}
 		res, err := get(u.Loc)
+		if audit {
+			elapsed = time.Since(start)
+		}
 		if err != nil {
 			if !nowarn {
 				log.Printf("Error priming %s: %v\n", u.Loc, err)
 			}
 		} else {
 			res.Body.Close()
+			if audit {
+				fmt.Printf("%d\t%4.2f\t%s\n", res.StatusCode, float64(elapsed)/float64(time.Millisecond), u.Loc)
+			}
 			if res.Status != "200 OK" && !nowarn {
 				log.Printf("Bad response for %s: %s\n", u.Loc, res.Status)
 			}
@@ -232,7 +257,9 @@ var (
 	localDir    string
 	localSuffix string
 	userAgent   string
+	addHeader   string
 	verbose     bool
+	audit       bool
 	nowarn      bool
 	printUrls   bool
 	primeUrls   bool
@@ -245,8 +272,10 @@ func init() {
 	flag.StringVar(&localDir, "l", "", "directory containing cached files (relative file names, i.e. /about/ -> <path>/about/index.html)")
 	flag.StringVar(&localSuffix, "ls", "index.html", "suffix of locally cached files")
 	flag.StringVar(&userAgent, "ua", defaultUA, "User-Agent header to send")
+	flag.StringVar(&addHeader, "H", "", "Additional header to add to requests")
 	flag.BoolVar(&verbose, "v", false, "show additional information about the priming process")
 	flag.BoolVar(&nowarn, "no-warn", false, "do not warn about pages that were not primed successfully")
+	flag.BoolVar(&audit, "a", false, "output HTTP status codes, fetch time. Incompatible with -v -a")
 	flag.BoolVar(&printUrls, "print", false, "(exclusive) just print the sorted URLs (can be used with xargs)")
 	flag.BoolVar(&primeUrls, "urls", false, "prime the URLs given as arguments rather than a sitemap")
 	flag.BoolVar(&insecureSsl, "insecure-ssl", false, "disable SSL certificate verification when priming HTTPS URLs")
@@ -279,6 +308,14 @@ func main() {
 	if max > 0 {
 		one = make(chan bool)
 	}
+
+
+    // disable transparent gzip compression for
+    // more hardcoreness
+    transport := &http.Transport{}
+    transport.DisableCompression = true
+    client.Transport = transport
+
 	sem = make(chan bool, throttle)
 	if insecureSsl {
 		client = &http.Client{
@@ -296,6 +333,10 @@ func main() {
 	} else {
 		path := flag.Arg(0)
 		urlset, err = getUrlsFromSitemap(path, true)
+	}
+	if audit {
+		verbose = false
+		nowarn = true
 	}
 	if err != nil {
 		fmt.Println("Error:", err)
